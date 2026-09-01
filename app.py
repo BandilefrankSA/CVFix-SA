@@ -570,6 +570,7 @@ with gr.Blocks(
 
 
 app.launch(
-    share=True,
+    server_name="0.0.0.0",
+    server_port=7860,
     css=css
 )
