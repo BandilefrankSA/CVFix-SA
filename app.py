@@ -571,7 +571,7 @@ with gr.Blocks(
 
 
 cvfix_seo = """
-<meta name="google-site-verification" content="Nyz8jJ9FEv8NCKHYVmXrzWqCksVPm6uZrJKQkgdR_vo">
+<meta id="xfo8ti" name="google-site-verification" content="Nyz8jJ9FEv8NCKHYVmXrzWqCksVPm6uZrJKQkgdR_vo" />
 <meta name="description" content="CVFix-SA — Professional CV creation and career tools by Junior Software Developer Mr BF Manikela.">
 <meta name="author" content="Mr BF Manikela">
 <meta name="robots" content="index, follow">
