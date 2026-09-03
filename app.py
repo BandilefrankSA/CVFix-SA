@@ -1,3 +1,4 @@
+import os
 
 import gradio as gr
 from pypdf import PdfReader
@@ -569,7 +570,18 @@ with gr.Blocks(
     )
 
 
+cvfix_seo = """
+<meta name="google-site-verification" content="Nyz8jJ9FEv8NCKHYVmXrzWqCksVPm6uZrJKQkgdR_vo" />
+<meta name="description" content="CVFix-SA — Professional CV creation and career tools by Junior Software Developer Mr BF Manikela.">
+<meta name="author" content="Mr BF Manikela">
+<meta name="robots" content="index, follow">
+<title>CVFix-SA | Professional CV Builder</title>
+"""
+
 app.launch(
-    share=True,
-    css=css
+    server_name="0.0.0.0",
+    server_port=int(os.environ.get("PORT", 7860)),
+    share=False,
+    css=css,
+    head=cvfix_seo
 )
