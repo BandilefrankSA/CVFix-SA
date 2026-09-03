@@ -2305,6 +2305,8 @@ footer {
 # ============================================================
 
 cvfix_seo = """
+<meta name="google-site-verification" content="Nyz8jJ9FEv8NCKHYVmXrzWqCksVPm6uZrJKQkgdR_vo" />
+
 <meta name="description"
 content="CVFix-SA is a smart CV improvement and job matching
 application founded by Junior Software Developer Mr BF Manikela.
