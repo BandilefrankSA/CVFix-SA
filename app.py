@@ -1,5 +1,5 @@
 import os
-
+from fastapi.responses import PlainTextResponse
 import gradio as gr
 from pypdf import PdfReader
 from docx import Document
@@ -578,10 +578,21 @@ cvfix_seo = """
 <title>CVFix-SA | Professional CV Builder</title>
 """
 
-app.launch(
-    server_name="0.0.0.0",
-    server_port=int(os.environ.get("PORT", 7860)),
-    share=False,
-    css=css,
-    head=cvfix_seo
-)
+from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
+import uvicorn
+
+web_app = FastAPI()
+
+@web_app.get("/googlefbe36a6741bd492b.html", response_class=PlainTextResponse)
+async def google_verification():
+    return "google-site-verification: googlefbe36a6741bd492b.html"
+
+web_app = gr.mount_gradio_app(web_app, app, path="/")
+
+if __name__ == "__main__":
+    uvicorn.run(
+        web_app,
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 7860))
+    )
