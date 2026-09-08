@@ -1,4 +1,5 @@
 import os
+import hmac
 
 import gradio as gr
 import spacy
@@ -15,6 +16,47 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 # CV STORAGE
 # ============================================================
 # ============================================================
+
+
+# ============================================================
+# CVFIX-SA OWNER AUTHENTICATION
+# ============================================================
+
+# Owner credentials are intentionally NOT stored in app.py.
+# They come from Render environment variables.
+#
+# Required environment variables:
+# CVFIX_OWNER_USERNAME
+# CVFIX_OWNER_PASSWORD
+
+def cvfix_owner_auth(username, password):
+
+    owner_username = os.environ.get(
+        "CVFIX_OWNER_USERNAME",
+        ""
+    )
+
+    owner_password = os.environ.get(
+        "CVFIX_OWNER_PASSWORD",
+        ""
+    )
+
+    if not owner_username or not owner_password:
+        return False
+
+    username_match = hmac.compare_digest(
+        str(username),
+        str(owner_username)
+    )
+
+    password_match = hmac.compare_digest(
+        str(password),
+        str(owner_password)
+    )
+
+    return username_match and password_match
+
+
 # CVFIX-SA SMART ENGINE
 # ============================================================
 
@@ -3115,5 +3157,7 @@ app.launch(
     server_port=int(os.environ.get("PORT", 7860)),
     share=False,
     css=css,
-    head=cvfix_seo
+    head=cvfix_seo,
+    auth=cvfix_owner_auth,
+    auth_message="CVFix-SA Owner Login"
 )
