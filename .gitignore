@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Gradio local state
+.gradio/
+
+# Local CVFix development account database
+cvfix_accounts_dev.db
+
+# Development/runtime logs
+*.log
+runtime_test.log
+
+# Local development backups
+app.py.before_*.py
+app.py.STAGE5_FINAL_BACKUP_*.py
+
+# Colab/runtime artifacts
+.ipynb_checkpoints/

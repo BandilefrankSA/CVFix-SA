@@ -1,5 +1,10 @@
 import os
 import hmac
+import sqlite3
+import hashlib
+import secrets
+import re
+from datetime import datetime
 
 import gradio as gr
 import spacy
@@ -1081,7 +1086,6 @@ def create_cvfix_professional_cv():
     from docx.enum.section import WD_SECTION
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    import re
     import os
 
     # ========================================================
@@ -2857,6 +2861,497 @@ css = """
 # WEBSITE
 # ============================================================
 
+
+# ============================================================
+# CVFIX-SA REGULAR USER ACCOUNT FOUNDATION
+# ============================================================
+
+CVFIX_ACCOUNT_DB = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "cvfix_accounts_dev.db"
+)
+
+
+def cvfix_account_connection():
+    connection = sqlite3.connect(CVFIX_ACCOUNT_DB)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def cvfix_init_account_database():
+
+    connection = cvfix_account_connection()
+
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS users ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "username TEXT NOT NULL UNIQUE, "
+        "email TEXT NOT NULL UNIQUE, "
+        "password_hash TEXT NOT NULL, "
+        "password_salt TEXT NOT NULL, "
+        "role TEXT NOT NULL DEFAULT 'user', "
+        "created_at TEXT NOT NULL, "
+        "last_login TEXT)"
+    )
+
+    connection.commit()
+    connection.close()
+
+
+def cvfix_hash_password(password, salt=None):
+
+    if salt is None:
+        salt = secrets.token_hex(16)
+
+    password_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        310000
+    ).hex()
+
+    return password_hash, salt
+
+
+def cvfix_verify_password(
+    password,
+    stored_hash,
+    stored_salt
+):
+
+    password_hash, _ = cvfix_hash_password(
+        password,
+        stored_salt
+    )
+
+    return secrets.compare_digest(
+        password_hash,
+        stored_hash
+    )
+
+
+cvfix_init_account_database()
+
+# ============================================================
+# END ACCOUNT DATABASE FOUNDATION
+# ============================================================
+
+
+
+# ============================================================
+# CVFIX-SA REGULAR USER REGISTRATION + LOGIN
+# ============================================================
+
+
+def cvfix_validate_username(username):
+
+    username = str(username).strip()
+
+    if not username:
+        return False, "Username is required."
+
+    if len(username) < 3:
+        return False, "Username must be at least 3 characters."
+
+    if len(username) > 30:
+        return False, "Username must not exceed 30 characters."
+
+    if not re.fullmatch(
+        r"[A-Za-z0-9_.-]+",
+        username
+    ):
+        return False, (
+            "Username may contain only letters, numbers, "
+            "underscores, dots and hyphens."
+        )
+
+    return True, ""
+
+
+def cvfix_validate_email(email):
+
+    email = str(email).strip().lower()
+
+    if not email:
+        return False, "Email is required."
+
+    if not re.fullmatch(
+        r"[^@\s]+@[^@\s]+\.[^@\s]+",
+        email
+    ):
+        return False, "Please enter a valid email address."
+
+    return True, ""
+
+
+def cvfix_register_user(
+    username,
+    email,
+    password
+):
+
+    username = str(username).strip()
+    email = str(email).strip().lower()
+    password = str(password)
+
+    valid_username, message = (
+        cvfix_validate_username(username)
+    )
+
+    if not valid_username:
+        return False, message
+
+    valid_email, message = (
+        cvfix_validate_email(email)
+    )
+
+    if not valid_email:
+        return False, message
+
+    if len(password) < 8:
+        return False, (
+            "Password must be at least 8 characters."
+        )
+
+    connection = cvfix_account_connection()
+
+    try:
+
+        existing_username = connection.execute(
+            "SELECT id FROM users WHERE username = ?",
+            (username,)
+        ).fetchone()
+
+        if existing_username:
+            return False, "Username is already registered."
+
+        existing_email = connection.execute(
+            "SELECT id FROM users WHERE email = ?",
+            (email,)
+        ).fetchone()
+
+        if existing_email:
+            return False, "Email is already registered."
+
+        password_hash, password_salt = (
+            cvfix_hash_password(password)
+        )
+
+        created_at = datetime.utcnow().isoformat()
+
+        connection.execute(
+            "INSERT INTO users "
+            "(username, email, password_hash, "
+            "password_salt, role, created_at, last_login) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                username,
+                email,
+                password_hash,
+                password_salt,
+                "user",
+                created_at,
+                None
+            )
+        )
+
+        connection.commit()
+
+        return True, "Account created successfully."
+
+    except Exception as error:
+
+        connection.rollback()
+
+        return False, (
+            "Could not create account: "
+            + str(error)
+        )
+
+    finally:
+
+        connection.close()
+
+
+def cvfix_login_user(
+    username_or_email,
+    password
+):
+
+    username_or_email = (
+        str(username_or_email).strip()
+    )
+
+    password = str(password)
+
+    # --------------------------------------------------------
+    # EXISTING OWNER LOGIN
+    # --------------------------------------------------------
+    #
+    # This uses the existing environment variables and secure
+    # comparison. It is intentionally kept in this function
+    # only so owner and regular-user login can share the UI.
+    #
+    # OWNER CREDENTIALS ARE NOT STORED IN SQLITE.
+    # --------------------------------------------------------
+
+    owner_username = os.environ.get(
+        "CVFIX_OWNER_USERNAME",
+        ""
+    )
+
+    owner_password = os.environ.get(
+        "CVFIX_OWNER_PASSWORD",
+        ""
+    )
+
+    if owner_username and owner_password:
+
+        username_match = hmac.compare_digest(
+            username_or_email,
+            str(owner_username)
+        )
+
+        password_match = hmac.compare_digest(
+            password,
+            str(owner_password)
+        )
+
+        if username_match and password_match:
+
+            return {
+                "id": "OWNER",
+                "username": str(owner_username),
+                "email": "",
+                "role": "owner",
+                "created_at": "",
+                "last_login": ""
+            }
+
+    # --------------------------------------------------------
+    # REGULAR USER LOGIN
+    # --------------------------------------------------------
+
+    connection = cvfix_account_connection()
+
+    row = connection.execute(
+        "SELECT id, username, email, password_hash, "
+        "password_salt, role, created_at, last_login "
+        "FROM users "
+        "WHERE username = ? OR email = ? "
+        "LIMIT 1",
+        (
+            username_or_email,
+            username_or_email.lower()
+        )
+    ).fetchone()
+
+    if row is None:
+
+        connection.close()
+
+        return None
+
+    valid_password = cvfix_verify_password(
+        password,
+        row["password_hash"],
+        row["password_salt"]
+    )
+
+    if not valid_password:
+
+        connection.close()
+
+        return None
+
+    login_time = datetime.utcnow().isoformat()
+
+    connection.execute(
+        "UPDATE users "
+        "SET last_login = ? "
+        "WHERE id = ?",
+        (
+            login_time,
+            row["id"]
+        )
+    )
+
+    connection.commit()
+    connection.close()
+
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "email": row["email"],
+        "role": row["role"],
+        "created_at": row["created_at"],
+        "last_login": login_time
+    }
+
+
+def cvfix_get_user_by_id(user_id):
+
+    if user_id == "OWNER":
+
+        owner_username = os.environ.get(
+            "CVFIX_OWNER_USERNAME",
+            ""
+        )
+
+        return {
+            "id": "OWNER",
+            "username": owner_username,
+            "email": "",
+            "role": "owner",
+            "created_at": "",
+            "last_login": ""
+        }
+
+    connection = cvfix_account_connection()
+
+    row = connection.execute(
+        "SELECT id, username, email, role, "
+        "created_at, last_login "
+        "FROM users "
+        "WHERE id = ? "
+        "LIMIT 1",
+        (user_id,)
+    ).fetchone()
+
+    connection.close()
+
+    if row is None:
+        return None
+
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "email": row["email"],
+        "role": row["role"],
+        "created_at": row["created_at"],
+        "last_login": row["last_login"]
+    }
+
+
+# ============================================================
+# END REGULAR USER REGISTRATION + LOGIN
+# ============================================================
+
+
+
+
+# ============================================================
+# CVFIX-SA ACCOUNT LOGIN UI WRAPPER
+# ============================================================
+
+def cvfix_account_login_ui(
+    username_or_email,
+    password
+):
+
+    user = cvfix_login_user(
+        username_or_email,
+        password
+    )
+
+    if user is None:
+
+        return (
+            None,
+            "### ❌ Login failed\n\n"
+            "Incorrect username/email or password.",
+            gr.update(visible=False),
+            gr.update(visible=False),
+            ""
+        )
+
+    return (
+        user,
+        (
+            "### ✅ Login successful\n\n"
+            f"Welcome, **{user['username']}**."
+        ),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        cvfix_account_status_ui(user)
+    )
+
+
+# CVFIX-SA ACCOUNT STATUS DISPLAY
+def cvfix_account_status_ui(user):
+
+    if not isinstance(user, dict) or not user.get("id"):
+        return ""
+
+    username = str(user.get("username", "")).strip()
+    email = str(user.get("email", "")).strip()
+
+    if email:
+        return (
+            "### 👤 Account\n\n"
+            f"**Welcome, {username}**\n\n"
+            f"**Email:** {email}"
+        )
+
+    return (
+        "### 👤 Account\n\n"
+        f"**Welcome, {username}**"
+    )
+
+
+# CVFIX-SA BROWSER SESSION RESTORE
+def cvfix_restore_session_ui(user):
+
+    logged_in = (
+        isinstance(user, dict)
+        and user.get("id")
+    )
+
+    return (
+        gr.update(visible=bool(logged_in)),
+        gr.update(visible=bool(logged_in)),
+        cvfix_account_status_ui(user)
+    )
+
+
+# CVFIX-SA ACCOUNT LOGOUT
+def cvfix_account_logout_ui():
+
+    return (
+        None,
+        "### 👋 Logged out successfully\n\n"
+        "You have been logged out of CVFix-SA.",
+        gr.update(visible=False),
+        gr.update(visible=False),
+        ""
+    )
+
+
+# CVFIX-SA REGISTRATION UI WRAPPER
+def cvfix_account_register_ui(
+    username,
+    email,
+    password
+):
+    success, message = cvfix_register_user(
+        username,
+        email,
+        password
+    )
+
+    if success:
+        return (
+            "### ✅ Account created successfully\n\n"
+            "Your CVFix-SA account has been created. "
+            "You can now use the **🔐 Login** tab to sign in."
+        )
+
+    return (
+        "### ❌ Error\n\n"
+        + str(message)
+    )
+
+
 with gr.Blocks(
     title="CVFix-SA"
 ) as app:
@@ -2930,144 +3425,310 @@ with gr.Blocks(
         """
     )
 
+
+    # ========================================================
+    # CVFIX-SA REGULAR USER ACCOUNT UI
+    # ========================================================
+
+    account_user = gr.BrowserState(
+        default_value=None,
+        storage_key="cvfix_sa_account_user",
+        secret=os.environ.get(
+            "CVFIX_BROWSER_STATE_SECRET",
+            "CVFix-SA-development-browser-state-secret"
+        )
+    )
+
+    with gr.Group():
+
+        gr.Markdown(
+            """
+            ## 👤 CVFix-SA Account
+
+            Create an account to use CVFix-SA, or log in if you
+            already have an account.
+            """
+        )
+
+        with gr.Tabs():
+
+            # ------------------------------------------------
+            # REGISTER
+            # ------------------------------------------------
+
+            with gr.Tab("📝 Create Account"):
+
+                register_username = gr.Textbox(
+                    label="Username",
+                    placeholder="Choose a username",
+                    max_lines=1
+                )
+
+                register_email = gr.Textbox(
+                    label="Email",
+                    placeholder="Enter your email address",
+                    max_lines=1
+                )
+
+                register_password = gr.Textbox(
+                    label="Password",
+                    placeholder="Minimum 8 characters",
+                    type="password",
+                    max_lines=1
+                )
+
+                register_button = gr.Button(
+                    "📝 Create My Account",
+                    variant="primary"
+                )
+
+                register_message = gr.Markdown()
+
+                register_button.click(
+                    fn=cvfix_account_register_ui,
+                    inputs=[
+                        register_username,
+                        register_email,
+                        register_password
+                    ],
+                    outputs=register_message,
+                    queue=False
+                )
+
+            # ------------------------------------------------
+            # LOGIN
+            # ------------------------------------------------
+
+            with gr.Tab("🔐 Login"):
+
+                login_username = gr.Textbox(
+                    label="Username or Email",
+                    placeholder="Enter your username or email",
+                    max_lines=1
+                )
+
+                login_password = gr.Textbox(
+                    label="Password",
+                    placeholder="Enter your password",
+                    type="password",
+                    max_lines=1
+                )
+
+                login_button = gr.Button(
+                    "🔐 Log In",
+                    variant="primary"
+                )
+
+                login_message = gr.Markdown()
+
+                logout_button = gr.Button(
+                    "🚪 Log Out",
+                    variant="secondary",
+                    visible=False
+                )
+
+                account_status = gr.Markdown()
+
+
+        gr.Markdown(
+            """
+            **Your account is separate from your CV content.**
+            Your password is securely hashed before it is stored.
+            """
+        )
+
     gr.Markdown("---")
 
-    with gr.Tabs():
+    with gr.Group(visible=False) as cv_workspace:
 
-        with gr.Tab("📄 Upload CV"):
+        with gr.Tabs():
 
-            gr.Markdown(
-                "# Upload Your CV\n\n"
-                "Supported formats: **PDF** and **DOCX**"
-            )
+            with gr.Tab("📄 Upload CV"):
 
-            cv_file = gr.File(
-                label="Choose your CV",
-                file_types=[".pdf", ".docx"],
-                type="filepath"
-            )
-
-            upload_result = gr.Markdown()
-
-            cv_file.change(
-                fn=upload_cv,
-                inputs=cv_file,
-                outputs=upload_result
-            )
-
-        with gr.Tab("🔍 Analyse"):
-
-            gr.Markdown(
-                "# 🔍 Analyse Your CV"
-            )
-
-            job_description = gr.Textbox(
-                label="💼 Job Description",
-                placeholder=(
-                    "Paste the complete job description here..."
-                ),
-                lines=15
-            )
-
-            analyse_button = gr.Button(
-                "🔍 Analyse My CV",
-                variant="primary"
-            )
-
-            analysis_result = gr.Markdown()
-
-            with gr.Row():
-
-                overall = gr.Textbox(
-                    label="🏆 Overall",
-                    interactive=False
+                gr.Markdown(
+                    "# Upload Your CV\n\n"
+                    "Supported formats: **PDF** and **DOCX**"
                 )
 
-                structure = gr.Textbox(
-                    label="📄 Structure",
-                    interactive=False
+                cv_file = gr.File(
+                    label="Choose your CV",
+                    file_types=[".pdf", ".docx"],
+                    type="filepath"
                 )
 
-                match = gr.Textbox(
-                    label="💼 Job Match",
-                    interactive=False
+                upload_result = gr.Markdown()
+
+                cv_file.change(
+                    fn=upload_cv,
+                    inputs=cv_file,
+                    outputs=upload_result
                 )
 
-                skills = gr.Textbox(
-                    label="🛠 Skills",
-                    interactive=False
+            with gr.Tab("🔍 Analyse"):
+
+                gr.Markdown(
+                    "# 🔍 Analyse Your CV"
                 )
 
-            analyse_button.click(
-                fn=analyse_cv,
-                inputs=job_description,
-                outputs=[
-                    analysis_result,
-                    overall,
-                    structure,
-                    match,
-                    skills
-                ]
-            )
+                job_description = gr.Textbox(
+                    label="💼 Job Description",
+                    placeholder=(
+                        "Paste the complete job description here..."
+                    ),
+                    lines=15
+                )
 
-        with gr.Tab("✨ Improve"):
+                analyse_button = gr.Button(
+                    "🔍 Analyse My CV",
+                    variant="primary"
+                )
 
-            gr.Markdown(
-                "# ✨ Improve Your CV"
-            )
+                analysis_result = gr.Markdown()
 
-            improve_button = gr.Button(
-                "✨ Improve My CV",
-                variant="primary"
-            )
+                with gr.Row():
 
-            improvement_result = gr.Markdown()
+                    overall = gr.Textbox(
+                        label="🏆 Overall",
+                        interactive=False
+                    )
 
-            improve_button.click(
-                fn=improve_cv,
-                inputs=job_description,
-                outputs=improvement_result
-            )
+                    structure = gr.Textbox(
+                        label="📄 Structure",
+                        interactive=False
+                    )
+
+                    match = gr.Textbox(
+                        label="💼 Job Match",
+                        interactive=False
+                    )
+
+                    skills = gr.Textbox(
+                        label="🛠 Skills",
+                        interactive=False
+                    )
+
+                analyse_button.click(
+                    fn=analyse_cv,
+                    inputs=job_description,
+                    outputs=[
+                        analysis_result,
+                        overall,
+                        structure,
+                        match,
+                        skills
+                    ]
+                )
+
+            with gr.Tab("✨ Improve"):
+
+                gr.Markdown(
+                    "# ✨ Improve Your CV"
+                )
+
+                improve_button = gr.Button(
+                    "✨ Improve My CV",
+                    variant="primary"
+                )
+
+                improvement_result = gr.Markdown()
+
+                improve_button.click(
+                    fn=improve_cv,
+                    inputs=job_description,
+                    outputs=improvement_result
+                )
 
         
-        with gr.Tab("⬇️ Download"):
+            with gr.Tab("⬇️ Download"):
 
-            gr.Markdown(
-                "# ⬇️ Download Your CV\n\n"
-                "Choose how you want CVFix-SA to format your CV."
-            )
-
-            cv_format = gr.Radio(
-                choices=[
-                    "CVFix-SA Professional Format",
-                    "Keep My Original Format"
-                ],
-                value="CVFix-SA Professional Format",
-                label="📄 Choose Your CV Format",
-                info=(
-                    "CVFix-SA Professional Format uses the "
-                    "CVFix-SA structured professional layout. "
-                    "Keep My Original Format preserves your "
-                    "original Word document formatting when possible."
+                gr.Markdown(
+                    "# ⬇️ Download Your CV\n\n"
+                    "Choose how you want CVFix-SA to format your CV."
                 )
-            )
 
-            download_button = gr.Button(
-                "📄 Generate My CV",
-                variant="primary"
-            )
+                cv_format = gr.Radio(
+                    choices=[
+                        "CVFix-SA Professional Format",
+                        "Keep My Original Format"
+                    ],
+                    value="CVFix-SA Professional Format",
+                    label="📄 Choose Your CV Format",
+                    info=(
+                        "CVFix-SA Professional Format uses the "
+                        "CVFix-SA structured professional layout. "
+                        "Keep My Original Format preserves your "
+                        "original Word document formatting when possible."
+                    )
+                )
 
-            download_file = gr.File(
-                label="Your CV"
-            )
+                download_button = gr.Button(
+                    "📄 Generate My CV",
+                    variant="primary"
+                )
 
-            download_button.click(
-                fn=create_download,
-                inputs=cv_format,
-                outputs=download_file
-            )
+                download_file = gr.File(
+                    label="Your CV"
+                )
+
+                download_button.click(
+                    fn=create_download,
+                    inputs=cv_format,
+                    outputs=download_file
+                )
 
 
+
+
+    
+    # ========================================================
+    # CVFIX-SA BROWSER SESSION RESTORE
+    # Restore workspace visibility after page refresh.
+    # ========================================================
+    app.load(
+        fn=cvfix_restore_session_ui,
+        inputs=account_user,
+        outputs=[
+            cv_workspace,
+            logout_button,
+            account_status
+        ]
+    )
+
+
+    # ========================================================
+    # CVFIX-SA LOGIN EVENT
+    # Registered after cv_workspace exists.
+    # ========================================================
+    login_button.click(
+        fn=cvfix_account_login_ui,
+        inputs=[
+            login_username,
+            login_password
+        ],
+        outputs=[
+            account_user,
+            login_message,
+            cv_workspace,
+            logout_button,
+            account_status
+        ]
+    )
+
+
+    # ========================================================
+    # CVFIX-SA LOGOUT EVENT
+    # ========================================================
+    logout_button.click(
+        fn=cvfix_account_logout_ui,
+        inputs=[],
+        outputs=[
+            account_user,
+            login_message,
+            cv_workspace,
+            logout_button,
+            account_status
+        ]
+    )
 
     gr.Markdown(
         """
@@ -3158,6 +3819,4 @@ app.launch(
     share=False,
     css=css,
     head=cvfix_seo,
-    auth=cvfix_owner_auth,
-    auth_message="CVFix-SA Owner Login"
 )
